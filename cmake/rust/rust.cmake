@@ -28,12 +28,19 @@ if(NOT ${Python3_Interpreter_FOUND})
 endif()
 set(GENERATE_CARGO_CONFIG_SCRIPT "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_LIST_DIR}/generate-cargo-config.py")
 
+if(USING_MUSL)
+    set(RUST_TARGET_TRIPLE "${CMAKE_SYSTEM_PROCESSOR}-unknown-linux-musl")
+else()
+    set(RUST_TARGET_TRIPLE "${CMAKE_SYSTEM_PROCESSOR}-unknown-linux-gnu")
+endif()
+
 # Store variables as target properties so that that are accessible in different scopes
 set_target_properties(generate_rust
     PROPERTIES
         CARGO_EXECUTABLE "${CARGO_EXECUTABLE}"
         RUST_OUTPUT_DIR "${RUST_OUTPUT_DIR}"
         RUST_LINK_DEPENDENCIES_FILE "${RUST_LINK_DEPENDENCIES_FILE}"
+        RUST_TARGET_TRIPLE "${RUST_TARGET_TRIPLE}"
         EVEREST_CORE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
         GENERATE_CARGO_CONFIG_SCRIPT "${GENERATE_CARGO_CONFIG_SCRIPT}"
         ADDITIONAL_CLEAN_FILES "${RUST_OUTPUT_DIR}/target"
@@ -59,22 +66,14 @@ function (ev_add_rs_module MODULE_NAME)
     endif ()
 
     get_target_property(RUST_OUTPUT_DIR generate_rust RUST_OUTPUT_DIR)
+    get_target_property(RUST_TARGET_TRIPLE generate_rust RUST_TARGET_TRIPLE)
     set(RUST_MODULE_OUTPUT_DIR ${RUST_OUTPUT_DIR}/modules/${MODULE_NAME})
     set(RUST_MODULE_ARTIFACT_DIR ${RUST_MODULE_OUTPUT_DIR}/artifacts/$<CONFIG>)
     set(RUST_MODULE_BINARY ${RUST_MODULE_ARTIFACT_DIR}/bin/${MODULE_NAME})
     set(CARGO_CONFIG_FILE ${RUST_MODULE_OUTPUT_DIR}/cargo-config.toml)
-
-    # FIXME: Don't assume the glibc ABI here. This won't respect musl builds.
-    set(RUST_TARGET_TRIPLE "${CMAKE_SYSTEM_PROCESSOR}-unknown-linux-gnu")
     set(RUST_TARGET_BINARY_DIR ${RUST_OUTPUT_DIR}/target/${RUST_TARGET_TRIPLE}/$<LOWER_CASE:$<CONFIG>>)
 
     message(STATUS "Setting up Rust module ${MODULE_NAME}")
-
-    if(${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.20")
-        # Relative paths in depfiles used to be relative to the top-level build directory, but are now relative to the current working directory.
-        # This is irrelevant for us as we only use absolute paths, but CMake will warn about it unless we set this policy.
-        cmake_policy(SET CMP0116 NEW)
-    endif()
 
     add_custom_command(
         OUTPUT
@@ -94,6 +93,12 @@ function (ev_add_rs_module MODULE_NAME)
         VERBATIM
         COMMAND_EXPAND_LISTS
     )
+
+    if(${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.20")
+        # Relative paths in depfiles used to be relative to the top-level build directory, but are now relative to the current working directory.
+        # This is irrelevant for us as we only use absolute paths, but CMake will warn about it unless we set this policy.
+        cmake_policy(SET CMP0116 NEW)
+    endif()
 
     if(${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.25")
         # When the installation prefix is not in $PATH `cargo install` prints a warning, which this silences.
