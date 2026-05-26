@@ -108,6 +108,14 @@ function (ev_add_rs_module MODULE_NAME)
         set(CARGO_EXTRA_ENV_FLAGS "")
     endif()
 
+    if(${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.28")
+        # Specify that the custom command is aware of GNU Make job server,
+        # which allows it to run in parallel with other targets when using a compatible generator.
+        set(CARGO_JOB_SERVER_AWARE JOB_SERVER_AWARE TRUE)
+    else()
+        set(CARGO_JOB_SERVER_AWARE "")
+    endif()
+
     add_custom_command(
         OUTPUT
             ${RUST_MODULE_BINARY}
@@ -146,6 +154,7 @@ function (ev_add_rs_module MODULE_NAME)
         VERBATIM
         COMMAND_EXPAND_LISTS
         USES_TERMINAL
+        ${CARGO_JOB_SERVER_AWARE}
         COMMENT "Building ${MODULE_NAME}"
     )
 
