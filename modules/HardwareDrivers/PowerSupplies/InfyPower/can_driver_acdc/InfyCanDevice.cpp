@@ -340,8 +340,9 @@ void InfyCanDevice::handle_simple_telemetry_update(uint8_t source_address, const
                    << caps.min_voltage << "V, " << caps.max_current << "A, power " << caps.rated_power << "W";
         signalCapabilitiesUpdate(telemetries);
 
-        // Add the module to active module list if it isn't already there.
-        {
+        // Consider the module active again if we previously lost it due to communication timeout.
+        // This is only relevant in FIXED_ADDRESS mode, GROUP_DISCOVERY uses `ReadModuleCount` responses instead.
+        if (operating_mode == OperatingMode::FIXED_ADDRESS) {
             std::lock_guard<std::mutex> lock(active_modules_mutex);
             if (std::find(active_module_addresses.begin(), active_module_addresses.end(), source_address) ==
                 active_module_addresses.end()) {
