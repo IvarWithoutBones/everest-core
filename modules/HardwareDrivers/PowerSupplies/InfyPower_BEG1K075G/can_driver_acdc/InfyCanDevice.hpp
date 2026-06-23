@@ -8,6 +8,7 @@
 #include <atomic>
 #include <linux/can.h>
 #include <mutex>
+#include <optional>
 #include <sigslot/signal.hpp>
 #include <thread>
 
@@ -15,6 +16,9 @@ class InfyCanDevice : public CanDevice {
 public:
     InfyCanDevice();
     ~InfyCanDevice();
+
+    /// Configures the device driver. This must only be called once before the device is used, as it is not thread-safe.
+    void set_config(uint8_t group_address, uint8_t controller_address);
 
     enum class OutputMode {
         Parallel = 0xA0,
@@ -36,7 +40,7 @@ public:
     sigslot::signal<float, float, float> signalacdcTemperatures;
     sigslot::signal<float, float> signalVoltageCurrent;
     sigslot::signal<can_packet_acdc::PowerModuleStatus, can_packet_acdc::InverterStatus> signalModuleStatus;
-    bool request_rx(const uint8_t destination_address, const std::vector<uint8_t>& payload);
+    bool request_rx(const uint8_t device_number, const std::vector<uint8_t>& payload);
 
     struct Telemetry {
         float ac_ab_line_voltage{0.};
@@ -87,14 +91,25 @@ private:
     std::thread txThreadHandle;
     void txThread();
 
-    bool tx(const uint8_t destination_address, const std::vector<uint8_t>& payload);
+    bool tx(const uint8_t device_number, const std::vector<uint8_t>& payload);
 
+    // Static configuration, safe to access from multiple threads as it is only set once during initialization.
+    uint8_t group_address{};
+    uint8_t controller_address{};
+
+    // List of module addresses currently online in the group. TODO: Remove when they go offline
+    std::vector<uint8_t> module_addresses{};
+    std::mutex module_addresses_mutex{};
+    // The time we last received error 0x07 (in start processing). The module addresses are stable ~1s after.
+    std::optional<std::chrono::steady_clock::time_point> last_in_start_processing{std::nullopt};
+
+    // Dynamic configuration, will be changed at runtime.
     std::atomic<float> setpoint_voltage{0}, setpoint_current{0};
-    std::atomic_bool on;
-    std::atomic_bool walkin_enable;
-    std::atomic_bool inverter_mode;
+    std::atomic_bool on{false};
+    std::atomic_bool walkin_enable{false};
+    std::atomic_bool inverter_mode{false};
 
-    std::mutex settingsMutex;
+    std::mutex settingsMutex{};
 };
 
 #endif // INFY_CAN_DEVICE_HPP

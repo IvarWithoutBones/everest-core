@@ -13,11 +13,11 @@ namespace can_packet_acdc {
 
 uint32_t encode_can_id(uint8_t source_address, uint8_t destination_address, uint8_t command_number,
                        uint8_t device_number, uint8_t error_code);
-uint32_t encode_can_id(uint8_t destination_address, uint8_t command_number);
 
 uint8_t destination_address_from_can_id(uint32_t id);
 uint8_t source_address_from_can_id(uint32_t id);
 uint8_t command_number_from_can_id(uint32_t id);
+uint8_t device_number_from_can_id(uint32_t id);
 uint8_t error_code_from_can_id(uint32_t id);
 
 /*
@@ -58,9 +58,8 @@ uint8_t error_code_from_can_id(uint32_t id);
 const uint8_t CMD_READ = 0x23;
 const uint8_t CMD_WRITE = 0x24;
 
-// Addresses
-const uint8_t ADDR_BROADCAST = 0x3F;
-const uint8_t ADDR_MODULE = 0x00;
+const uint8_t DEV_MODULE = 0x0A;
+const uint8_t DEV_GROUP = 0x0B;
 
 // RX and TX packet definitions
 
@@ -99,6 +98,15 @@ struct SystemDCCurrent {
 struct PowerModuleNumber {
     PowerModuleNumber();
     PowerModuleNumber(const std::vector<uint8_t> raw);
+    friend std::ostream& operator<<(std::ostream& out, const PowerModuleNumber& self);
+    operator std::vector<uint8_t>();
+
+    uint16_t number{0};
+};
+
+struct PowerGroupNumber {
+    PowerGroupNumber();
+    PowerGroupNumber(const std::vector<uint8_t> raw);
     friend std::ostream& operator<<(std::ostream& out, const PowerModuleNumber& self);
     operator std::vector<uint8_t>();
 

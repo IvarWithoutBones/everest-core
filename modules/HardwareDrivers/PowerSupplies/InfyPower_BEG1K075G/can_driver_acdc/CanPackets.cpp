@@ -21,29 +21,20 @@ uint32_t encode_can_id(uint8_t source_address, uint8_t destination_address, uint
     return id;
 }
 
-/*
- destination_address is either 0x3F (broadcast) or group address
-*/
-uint32_t encode_can_id(uint8_t destination_address, uint8_t command_number) {
-    uint8_t device_number;
-    if (destination_address == 0x3F) {
-        device_number = 0x0A;
-    } else {
-        device_number = 0x0B;
-    }
-
-    return encode_can_id(0xF0, destination_address, command_number, device_number, 0);
-}
-
 uint8_t destination_address_from_can_id(uint32_t id) {
     return (id >> 8) & 0xFF;
 }
+
 uint8_t source_address_from_can_id(uint32_t id) {
     return id & 0xFF;
 }
 
 uint8_t command_number_from_can_id(uint32_t id) {
     return (id >> 16) & 0x3F;
+}
+
+uint8_t device_number_from_can_id(uint32_t id) {
+    return (id >> 22) & 0x0F;
 }
 
 uint8_t error_code_from_can_id(uint32_t id) {
@@ -152,6 +143,30 @@ PowerModuleNumber::operator std::vector<uint8_t>() {
     std::vector<uint8_t> data;
     to_raw(static_cast<uint8_t>(0x10), data);
     to_raw(static_cast<uint8_t>(0x10), data);
+    to_raw(static_cast<uint16_t>(0x00), data);
+    to_raw(static_cast<uint32_t>(0x00), data);
+
+    return data;
+}
+
+// PowerGroupNumber
+
+PowerGroupNumber::PowerGroupNumber(const std::vector<uint8_t> raw) {
+    number = from_raw<uint16_t>(raw, 6);
+}
+
+PowerGroupNumber::PowerGroupNumber() : number(0) {
+}
+
+std::ostream& operator<<(std::ostream& out, const PowerGroupNumber& self) {
+    out << "PowerGroupNumber: " << std::to_string(self.number);
+    return out;
+}
+
+PowerGroupNumber::operator std::vector<uint8_t>() {
+    std::vector<uint8_t> data;
+    to_raw(static_cast<uint8_t>(0x11), data);
+    to_raw(static_cast<uint8_t>(0x20), data);
     to_raw(static_cast<uint16_t>(0x00), data);
     to_raw(static_cast<uint32_t>(0x00), data);
 

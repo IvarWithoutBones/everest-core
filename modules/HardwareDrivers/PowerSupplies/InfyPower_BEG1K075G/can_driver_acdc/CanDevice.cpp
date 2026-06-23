@@ -106,7 +106,8 @@ bool CanDevice::_tx(uint32_t can_id, const std::vector<uint8_t>& payload) {
 
     struct can_frame frame;
     if (payload.size() > sizeof(frame.data)) {
-        throw std::runtime_error("Size of can payload data to large (" + std::to_string(payload.size()) + " bytes)");
+        EVLOG_error << "Size of can payload data to large (" << payload.size() << " bytes)";
+        return false;
     }
 
     frame.can_id = can_id;
@@ -114,7 +115,7 @@ bool CanDevice::_tx(uint32_t can_id, const std::vector<uint8_t>& payload) {
     memcpy(frame.data, payload.data(), payload.size());
 
     if (write(can_fd, &frame, sizeof(can_frame)) != sizeof(can_frame)) {
-        throw std::runtime_error(std::string("Failed to send can packet :") + strerror(errno));
+        EVLOG_error << "Failed to send can packet: " << strerror(errno);
         return false;
     }
 

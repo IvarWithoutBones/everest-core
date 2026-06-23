@@ -21,13 +21,15 @@ namespace module {
 
 struct Conf {
     std::string can_device;
+    int controller_address;
+    int group_address;
 };
 
 class InfyPower_BEG1K075G : public Everest::ModuleBase {
 public:
     InfyPower_BEG1K075G() = delete;
     InfyPower_BEG1K075G(const ModuleInfo& info, std::unique_ptr<power_supply_DCImplBase> p_main, Conf& config) :
-        ModuleBase(info), p_main(std::move(p_main)), config(config){};
+        ModuleBase(info), p_main(std::move(p_main)), config(config) {};
 
     const std::unique_ptr<power_supply_DCImplBase> p_main;
     const Conf& config;

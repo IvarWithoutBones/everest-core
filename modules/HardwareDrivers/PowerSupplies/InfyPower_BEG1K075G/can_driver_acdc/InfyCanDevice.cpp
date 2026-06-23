@@ -18,12 +18,25 @@ InfyCanDevice::~InfyCanDevice() {
     exitTxThread = true;
 }
 
+void InfyCanDevice::set_config(uint8_t group_address, uint8_t controller_address) {
+    this->group_address = group_address;
+    this->controller_address = controller_address;
+    EVLOG_info << "Configured InfyCanDevice with group 0x" << std::hex << std::uppercase
+               << static_cast<int>(group_address) << " controller address: 0x" << std::hex << std::uppercase
+               << static_cast<int>(controller_address);
+}
+
 void InfyCanDevice::rx_handler(uint32_t can_id, const std::vector<uint8_t>& payload) {
     EVLOG_debug << "Infy: CAN frame received. ID: 0x" << std::hex << can_id;
 
     // We only use extended frames here
     if (!(can_id & CAN_EFF_FLAG)) {
         EVLOG_debug << "Infy: Ignoring, not extended protocol.";
+        return;
+    }
+
+    // is it for our controller address?
+    if (can_packet_acdc::destination_address_from_can_id(can_id) != controller_address) {
         return;
     }
 
@@ -37,6 +50,11 @@ void InfyCanDevice::rx_handler(uint32_t can_id, const std::vector<uint8_t>& payl
             break;
         case 0x07:
             EVLOG_error << "Infy: ERROR: In start processing.";
+
+            // Module addresses aren't stable during startup, clear the list.
+            std::lock_guard<std::mutex> lock(module_addresses_mutex);
+            module_addresses.clear();
+            last_in_start_processing = std::chrono::steady_clock::now();
             break;
         }
         return;
@@ -47,12 +65,49 @@ void InfyCanDevice::rx_handler(uint32_t can_id, const std::vector<uint8_t>& payl
         return;
     }
 
-    // is it for us?
-    if (can_packet_acdc::destination_address_from_can_id(can_id) != 0xF0) {
-        return;
-    }
-
     uint16_t packet_type = payload[0] << 8 | payload[1];
+
+    // is it from our group address?
+    const auto source_address = can_packet_acdc::source_address_from_can_id(can_id);
+    if (packet_type == 0x1120) {
+        // This queries which module addresses are in the group, the CAN ID's source address is the module address,
+        // and the group address is encoded in the payload. Used to discover which modules are in the group.
+        can_packet_acdc::GenericSetting s(payload);
+        if (s.value != group_address) {
+            return;
+        }
+
+        // Check if we haven't received the "In Start Processing" error in a while, which occurs during system startup.
+        // During this (and ~1s afterwards) module addresses aren't assigned yet, and this packets always reads group 0.
+        std::lock_guard<std::mutex> lock(module_addresses_mutex);
+        if (last_in_start_processing.has_value() &&
+            std::chrono::steady_clock::now() - last_in_start_processing.value() < std::chrono::seconds(1)) {
+            EVLOG_debug << "Infy: Ignoring module address discovery, still in start processing.";
+            return;
+        }
+
+        // Add the module address to the list of known modules in the group (if it is not already present).
+        if (std::find(module_addresses.begin(), module_addresses.end(), source_address) == module_addresses.end()) {
+            EVLOG_info << "Infy: Discovered module address 0x" << std::hex << std::uppercase
+                       << static_cast<int>(source_address) << " in group 0x" << std::hex << std::uppercase
+                       << static_cast<int>(group_address);
+
+            module_addresses.push_back(source_address);
+        }
+    } else {
+        if (can_packet_acdc::device_number_from_can_id(can_id) == can_packet_acdc::DEV_GROUP) {
+            if (source_address != group_address)
+                return;
+        } else {
+            // The message came from a single module, check if our group manages it.
+            std::lock_guard<std::mutex> lock(module_addresses_mutex);
+            if (std::find(module_addresses.begin(), module_addresses.end(), source_address) == module_addresses.end()) {
+                EVLOG_debug << "Infy: Ignoring packet from unknown module address 0x" << std::hex << std::uppercase
+                            << static_cast<int>(source_address);
+                return;
+            }
+        }
+    }
 
     if (can_packet_acdc::error_code_from_can_id(can_id) > 0) {
         EVLOG_debug << "Infy: Parsing CAN packet type: " << std::hex << packet_type << " Error code:" << std::hex
@@ -102,6 +157,8 @@ void InfyCanDevice::rx_handler(uint32_t can_id, const std::vector<uint8_t>& payl
         can_packet_acdc::GenericSetting s(payload);
         telemetry.ambient_temperature = s.value / 1000.;
     } break;
+
+        // 0x1120: handled above
 
     case 0x1130: {
         can_packet_acdc::GenericSetting s(payload);
@@ -235,40 +292,43 @@ void InfyCanDevice::rx_handler(uint32_t can_id, const std::vector<uint8_t>& payl
 }
 
 void InfyCanDevice::txThread() {
-
     while (!exitTxThread) {
         const int delay_us = 50000;
 
+        // request which modules are in this group. Answer will be processed by RX thread.
+        request_rx(can_packet_acdc::DEV_GROUP, can_packet_acdc::PowerGroupNumber());
+        usleep(delay_us);
+
         // request current system DC voltage. Answer will be processed by RX thread.
-        request_rx(can_packet_acdc::ADDR_BROADCAST, can_packet_acdc::SystemDCVoltage());
+        request_rx(can_packet_acdc::DEV_GROUP, can_packet_acdc::SystemDCVoltage());
         usleep(delay_us);
 
         // request current system DC current. Answer will be processed by RX thread.
-        request_rx(can_packet_acdc::ADDR_BROADCAST, can_packet_acdc::SystemDCCurrent());
+        request_rx(can_packet_acdc::DEV_GROUP, can_packet_acdc::SystemDCCurrent());
         usleep(delay_us);
 
         // request state. Answer will be processed by RX thread.
-        request_rx(can_packet_acdc::ADDR_MODULE, can_packet_acdc::PowerModuleStatus());
+        request_rx(can_packet_acdc::DEV_MODULE, can_packet_acdc::PowerModuleStatus());
         usleep(delay_us);
 
         // request inverter state. Answer will be processed by RX thread.
-        request_rx(can_packet_acdc::ADDR_MODULE, can_packet_acdc::InverterStatus());
+        request_rx(can_packet_acdc::DEV_MODULE, can_packet_acdc::InverterStatus());
         usleep(delay_us);
 
-        tx(can_packet_acdc::ADDR_BROADCAST, can_packet_acdc::OnOff(on));
+        tx(can_packet_acdc::DEV_GROUP, can_packet_acdc::OnOff(on));
         usleep(delay_us);
 
         if (setpoint_voltage > 150.) {
-            tx(can_packet_acdc::ADDR_BROADCAST, can_packet_acdc::SystemDCVoltage(setpoint_voltage));
+            tx(can_packet_acdc::DEV_GROUP, can_packet_acdc::SystemDCVoltage(setpoint_voltage));
             usleep(delay_us);
-            tx(can_packet_acdc::ADDR_BROADCAST, can_packet_acdc::SystemDCCurrent(setpoint_current));
+            tx(can_packet_acdc::DEV_GROUP, can_packet_acdc::SystemDCCurrent(setpoint_current));
             usleep(delay_us);
         }
 
-        tx(can_packet_acdc::ADDR_BROADCAST, can_packet_acdc::WalkInEnable(walkin_enable));
+        tx(can_packet_acdc::DEV_GROUP, can_packet_acdc::WalkInEnable(walkin_enable));
         usleep(delay_us);
 
-        tx(can_packet_acdc::ADDR_BROADCAST, can_packet_acdc::WorkingMode(inverter_mode));
+        tx(can_packet_acdc::DEV_GROUP, can_packet_acdc::WorkingMode(inverter_mode));
         usleep(delay_us);
     }
 }
@@ -289,7 +349,7 @@ bool InfyCanDevice::set_inverter_mode(bool i) {
 }
 
 bool InfyCanDevice::adjust_power_factor(float pf) {
-    return tx(can_packet_acdc::ADDR_MODULE, can_packet_acdc::PowerFactorAdjust(pf));
+    return tx(can_packet_acdc::DEV_GROUP, can_packet_acdc::PowerFactorAdjust(pf));
 }
 
 bool InfyCanDevice::set_voltage_current(float voltage, float current) {
@@ -299,23 +359,49 @@ bool InfyCanDevice::set_voltage_current(float voltage, float current) {
 }
 
 bool InfyCanDevice::set_generic_setting(uint8_t byte0, uint8_t byte1, uint32_t value) {
-    return tx(can_packet_acdc::ADDR_BROADCAST, can_packet_acdc::GenericSetting(byte0, byte1, value));
+    return tx(can_packet_acdc::DEV_GROUP, can_packet_acdc::GenericSetting(byte0, byte1, value));
 }
 
 bool InfyCanDevice::set_output_mode(OutputMode mode) {
     return set_generic_setting(0x11, 0x26, static_cast<std::underlying_type<OutputMode>::type>(mode));
 }
 
-bool InfyCanDevice::tx(const uint8_t destination_address, const std::vector<uint8_t>& payload) {
-    uint32_t can_id = can_packet_acdc::encode_can_id(destination_address, can_packet_acdc::CMD_WRITE);
-    can_id |= 0x80000000U; // Extended frame format
-    return _tx(can_id, payload);
+bool InfyCanDevice::tx(const uint8_t dev, const std::vector<uint8_t>& payload) {
+    std::vector<uint8_t> destinations{};
+    if (dev == can_packet_acdc::DEV_MODULE) {
+        // TODO: Pass module_addresses to avoid re-locking
+        std::lock_guard<std::mutex> lock(module_addresses_mutex);
+        destinations = module_addresses;
+    } else {
+        destinations.push_back(group_address);
+    }
+
+    bool success = true;
+    for (const auto dst : destinations) {
+        auto can_id = can_packet_acdc::encode_can_id(controller_address, dst, can_packet_acdc::CMD_WRITE, dev, 0);
+        can_id |= 0x80000000U; // Extended frame format
+        success &= _tx(can_id, payload);
+    }
+    return success;
 }
 
-bool InfyCanDevice::request_rx(const uint8_t destination_address, const std::vector<uint8_t>& payload) {
-    uint32_t can_id = can_packet_acdc::encode_can_id(destination_address, can_packet_acdc::CMD_READ);
-    can_id |= 0x80000000U; // Extended frame format
-    return _tx(can_id, payload);
+bool InfyCanDevice::request_rx(const uint8_t dev, const std::vector<uint8_t>& payload) {
+    std::vector<uint8_t> destinations{};
+    if (dev == can_packet_acdc::DEV_MODULE) {
+        // TODO: Pass module_addresses to avoid re-locking
+        std::lock_guard<std::mutex> lock(module_addresses_mutex);
+        destinations = module_addresses;
+    } else {
+        destinations.push_back(group_address);
+    }
+
+    bool success = true;
+    for (const auto dst : destinations) {
+        uint32_t can_id = can_packet_acdc::encode_can_id(controller_address, dst, can_packet_acdc::CMD_READ, dev, 0);
+        can_id |= 0x80000000U; // Extended frame format
+        success &= _tx(can_id, payload);
+    }
+    return success;
 }
 
 std::ostream& operator<<(std::ostream& out, const InfyCanDevice::Telemetry& self) {

@@ -8,8 +8,11 @@
 #include <everest/logging.hpp>
 
 int main(int argc, char** argv) {
-    InfyCanDevice can;
+    constexpr static uint8_t group_address = 0;
+    constexpr static uint8_t controller_address = 0xF0;
 
+    InfyCanDevice can{};
+    can.set_config(group_address, controller_address);
     if (!can.open_device("can0")) {
         return 1;
     }
@@ -51,22 +54,22 @@ int main(int argc, char** argv) {
     can.adjust_power_factor(1.0);
 
     while (true) {
-        can.request_rx(can_packet_acdc::ADDR_MODULE, can_packet_acdc::GenericSetting(0x11, 0x03, 0x00));
-        can.request_rx(can_packet_acdc::ADDR_MODULE, can_packet_acdc::GenericSetting(0x11, 0x04, 0x00));
-        can.request_rx(can_packet_acdc::ADDR_MODULE, can_packet_acdc::GenericSetting(0x11, 0x05, 0x00));
-        can.request_rx(can_packet_acdc::ADDR_MODULE, can_packet_acdc::GenericSetting(0x11, 0x06, 0x00));
+        can.request_rx(can_packet_acdc::DEV_MODULE, can_packet_acdc::GenericSetting(0x11, 0x03, 0x00));
+        can.request_rx(can_packet_acdc::DEV_MODULE, can_packet_acdc::GenericSetting(0x11, 0x04, 0x00));
+        can.request_rx(can_packet_acdc::DEV_MODULE, can_packet_acdc::GenericSetting(0x11, 0x05, 0x00));
+        can.request_rx(can_packet_acdc::DEV_MODULE, can_packet_acdc::GenericSetting(0x11, 0x06, 0x00));
 
-        can.request_rx(can_packet_acdc::ADDR_MODULE, can_packet_acdc::GenericSetting(0x11, 0x30, 0x00));
-        can.request_rx(can_packet_acdc::ADDR_MODULE, can_packet_acdc::GenericSetting(0x11, 0x31, 0x00));
+        can.request_rx(can_packet_acdc::DEV_MODULE, can_packet_acdc::GenericSetting(0x11, 0x30, 0x00));
+        can.request_rx(can_packet_acdc::DEV_MODULE, can_packet_acdc::GenericSetting(0x11, 0x31, 0x00));
 
-        can.request_rx(can_packet_acdc::ADDR_MODULE, can_packet_acdc::GenericSetting(0x11, 0x32, 0x00));
-        can.request_rx(can_packet_acdc::ADDR_MODULE, can_packet_acdc::GenericSetting(0x11, 0x33, 0x00));
+        can.request_rx(can_packet_acdc::DEV_MODULE, can_packet_acdc::GenericSetting(0x11, 0x32, 0x00));
+        can.request_rx(can_packet_acdc::DEV_MODULE, can_packet_acdc::GenericSetting(0x11, 0x33, 0x00));
         for (uint8_t i = 0x01; i < 0x14; i++) {
-            can.request_rx(can_packet_acdc::ADDR_MODULE, can_packet_acdc::GenericSetting(0x21, i, 0x00));
+            can.request_rx(can_packet_acdc::DEV_MODULE, can_packet_acdc::GenericSetting(0x21, i, 0x00));
         }
 
-        can.request_rx(can_packet_acdc::ADDR_MODULE, can_packet_acdc::GenericSetting(0x41, 0x01, 0x00));
-        can.request_rx(can_packet_acdc::ADDR_MODULE, can_packet_acdc::GenericSetting(0x41, 0x02, 0x00));
+        can.request_rx(can_packet_acdc::DEV_MODULE, can_packet_acdc::GenericSetting(0x41, 0x01, 0x00));
+        can.request_rx(can_packet_acdc::DEV_MODULE, can_packet_acdc::GenericSetting(0x41, 0x02, 0x00));
 
         usleep(50000);
 
