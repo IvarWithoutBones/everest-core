@@ -45,11 +45,11 @@ int main(int argc, char** argv) {
     EVLOG_debug << "Protection settings applied";
 
     can.set_inverter_mode(false);
-    can.set_voltage_current(200, 10);
+    can.set_voltage_current(200, 10, true);
     can.set_walkin_enabled(false);
 
     can.switch_on_off(true);
-    can.set_voltage_current(200, 10);
+    can.set_voltage_current(200, 10, true);
 
     can.adjust_power_factor(1.0);
 

@@ -139,7 +139,7 @@ void power_supply_DCImpl::handle_setExportVoltageCurrent(double& voltage, double
         EVLOG_info << std::fixed << std::setprecision(2) << "Updating voltage/current via CAN: " << exportVoltage
                    << "V / " << exportCurrentLimit << "A";
     }
-    mod->acdc.set_voltage_current(exportVoltage, exportCurrentLimit);
+    mod->acdc.set_voltage_current(exportVoltage, exportCurrentLimit, true);
 };
 
 void power_supply_DCImpl::handle_setImportVoltageCurrent(double& voltage, double& current) {
@@ -165,7 +165,7 @@ void power_supply_DCImpl::handle_setImportVoltageCurrent(double& voltage, double
             EVLOG_info << std::fixed << std::setprecision(2) << "Updating voltage/current via CAN: " << minImportVoltage
                        << "V / " << importCurrentLimit << "A";
         }
-        mod->acdc.set_voltage_current(minImportVoltage, importCurrentLimit);
+        mod->acdc.set_voltage_current(minImportVoltage, importCurrentLimit, false);
     }
 }
 

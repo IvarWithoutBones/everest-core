@@ -89,8 +89,7 @@ void InfyCanDevice::rx_handler(uint32_t can_id, const std::vector<uint8_t>& payl
         // Add the module address to the list of known modules in the group (if it is not already present).
         if (std::find(module_addresses.begin(), module_addresses.end(), source_address) == module_addresses.end()) {
             EVLOG_info << "Infy: Discovered module address 0x" << std::hex << std::uppercase
-                       << static_cast<int>(source_address) << " in group 0x" << std::hex << std::uppercase
-                       << static_cast<int>(group_address);
+                       << static_cast<int>(source_address);
 
             module_addresses.push_back(source_address);
         }
@@ -116,12 +115,14 @@ void InfyCanDevice::rx_handler(uint32_t can_id, const std::vector<uint8_t>& payl
 
     switch (packet_type) {
     case 0x1001: {
-        telemetry.voltage = payload;
+        telemetry.battery_voltage = payload;
     } break;
 
     case 0x1002: {
-        telemetry.current = payload;
-        signalVoltageCurrent(telemetry.voltage.volt, telemetry.current.ampere);
+        telemetry.battery_current = payload;
+        if (!inverter_mode.load()) {
+            signalVoltageCurrent(telemetry.battery_voltage.volt, telemetry.battery_current.ampere);
+        }
     } break;
 
     case 0x1010: {
@@ -276,13 +277,14 @@ void InfyCanDevice::rx_handler(uint32_t can_id, const std::vector<uint8_t>& payl
     } break;
 
     case 0x4101: {
-        can_packet_acdc::GenericSetting s(payload);
-        telemetry.dc_high_side_voltage = s.value / 1000.;
+        telemetry.bus_voltage = {payload};
     } break;
 
     case 0x4102: {
-        can_packet_acdc::GenericSetting s(payload);
-        telemetry.dc_high_side_current = s.value / 1000.;
+        telemetry.bus_current = {payload};
+        if (inverter_mode.load()) {
+            signalVoltageCurrent(telemetry.bus_voltage.volt, telemetry.bus_current.ampere);
+        }
     } break;
 
     default: {
@@ -299,14 +301,6 @@ void InfyCanDevice::txThread() {
         request_rx(can_packet_acdc::DEV_GROUP, can_packet_acdc::PowerGroupNumber());
         usleep(delay_us);
 
-        // request current system DC voltage. Answer will be processed by RX thread.
-        request_rx(can_packet_acdc::DEV_GROUP, can_packet_acdc::SystemDCVoltage());
-        usleep(delay_us);
-
-        // request current system DC current. Answer will be processed by RX thread.
-        request_rx(can_packet_acdc::DEV_GROUP, can_packet_acdc::SystemDCCurrent());
-        usleep(delay_us);
-
         // request state. Answer will be processed by RX thread.
         request_rx(can_packet_acdc::DEV_MODULE, can_packet_acdc::PowerModuleStatus());
         usleep(delay_us);
@@ -318,11 +312,46 @@ void InfyCanDevice::txThread() {
         tx(can_packet_acdc::DEV_GROUP, can_packet_acdc::OnOff(on));
         usleep(delay_us);
 
-        if (setpoint_voltage > 150.) {
-            tx(can_packet_acdc::DEV_GROUP, can_packet_acdc::SystemDCVoltage(setpoint_voltage));
-            usleep(delay_us);
-            tx(can_packet_acdc::DEV_GROUP, can_packet_acdc::SystemDCCurrent(setpoint_current));
-            usleep(delay_us);
+        // request current battery-side DC voltage. Answer will be processed by RX thread.
+        request_rx(can_packet_acdc::DEV_GROUP, can_packet_acdc::BatteryDCVoltage());
+        usleep(delay_us);
+
+        // request current battery-side DC current. Answer will be processed by RX thread.
+        request_rx(can_packet_acdc::DEV_GROUP, can_packet_acdc::BatteryDCCurrent());
+        usleep(delay_us);
+
+        // request current bus-side DC voltage. Answer will be processed by RX thread.
+        request_rx(can_packet_acdc::DEV_MODULE, can_packet_acdc::BusDCVoltage());
+        usleep(delay_us);
+
+        // request current bus-side DC current. Answer will be processed by RX thread.
+        request_rx(can_packet_acdc::DEV_MODULE, can_packet_acdc::BusDCCurrent());
+        usleep(delay_us);
+
+        if (inverter_mode.load()) {
+            if (setpoint_import_voltage > 150.0) {
+                // Configure the bus side limits
+                tx(can_packet_acdc::DEV_GROUP, can_packet_acdc::BusDCVoltage(setpoint_import_voltage));
+                usleep(delay_us);
+                tx(can_packet_acdc::DEV_GROUP, can_packet_acdc::BusDCCurrent(setpoint_import_current));
+                usleep(delay_us);
+
+                // Configure the battery side limits
+                tx(can_packet_acdc::DEV_GROUP, can_packet_acdc::BatteryDCCurrent(setpoint_import_current * 2));
+                usleep(delay_us);
+            }
+        } else {
+            if (setpoint_export_voltage > 150.0) {
+                // Configure the battery side limits
+                tx(can_packet_acdc::DEV_GROUP, can_packet_acdc::BatteryDCVoltage(setpoint_export_voltage));
+                usleep(delay_us);
+                tx(can_packet_acdc::DEV_GROUP, can_packet_acdc::BatteryDCCurrent(setpoint_export_current));
+                usleep(delay_us);
+
+                // Configure the bus side limits
+                tx(can_packet_acdc::DEV_GROUP, can_packet_acdc::BusDCCurrent(setpoint_export_current * 2));
+                usleep(delay_us);
+            }
         }
 
         tx(can_packet_acdc::DEV_GROUP, can_packet_acdc::WalkInEnable(walkin_enable));
@@ -352,9 +381,14 @@ bool InfyCanDevice::adjust_power_factor(float pf) {
     return tx(can_packet_acdc::DEV_GROUP, can_packet_acdc::PowerFactorAdjust(pf));
 }
 
-bool InfyCanDevice::set_voltage_current(float voltage, float current) {
-    setpoint_current = current;
-    setpoint_voltage = voltage;
+bool InfyCanDevice::set_voltage_current(float voltage, float current, bool mode_export) {
+    if (mode_export) {
+        setpoint_export_current = current;
+        setpoint_export_voltage = voltage;
+    } else {
+        setpoint_import_current = current;
+        setpoint_import_voltage = voltage;
+    }
     return true;
 }
 
@@ -437,15 +471,15 @@ std::ostream& operator<<(std::ostream& out, const InfyCanDevice::Telemetry& self
     out << "AC frequency: " << self.ac_frequency << std::endl;
     out << "Ambient temperature: " << self.ambient_temperature << std::endl;
 
-    out << "DC High Voltage side: Voltage: " << std::to_string(self.dc_high_side_voltage)
-        << " Current: " << std::to_string(self.dc_high_side_current) << std::endl;
+    out << "DC High Voltage side: Voltage: " << std::to_string(self.bus_voltage.volt)
+        << " Current: " << std::to_string(self.bus_current.ampere) << std::endl;
 
     out << "Capabilities: dc_min: " << self.dc_min_output_voltage << "V dc_max: " << self.dc_max_output_voltage
         << "V dc_max_current: " << self.dc_max_output_current << "A max_watt: " << self.dc_rated_output_power << "W "
         << std::endl;
 
     out << self.status << std::endl;
-    out << self.voltage << std::endl << self.current << std::endl;
+    out << self.battery_voltage << std::endl << self.battery_current << std::endl;
 
     out << "------------------------------------------------\n";
 

@@ -71,24 +71,78 @@ GenericSetting::operator std::vector<uint8_t>() {
     return data;
 }
 
-// SystemDCVoltage
+// BatteyDCVoltage
 
-SystemDCVoltage::SystemDCVoltage(const std::vector<uint8_t> raw) {
+BusDCVoltage::BusDCVoltage(const std::vector<uint8_t> raw) {
     volt = (float)from_raw<uint32_t>(raw, 4) / 1000.;
 }
 
-SystemDCVoltage::SystemDCVoltage(float _volt) : volt(_volt) {
+BusDCVoltage::BusDCVoltage(float _volt) : volt(_volt) {
 }
 
-SystemDCVoltage::SystemDCVoltage() : volt(0.) {
+BusDCVoltage::BusDCVoltage() : volt(0.) {
 }
 
-std::ostream& operator<<(std::ostream& out, const SystemDCVoltage& self) {
-    out << "SystemDCVoltage: " << std::to_string(self.volt);
+std::ostream& operator<<(std::ostream& out, const BusDCVoltage& self) {
+    out << "BatteyDCVoltage: " << std::to_string(self.volt);
     return out;
 }
 
-SystemDCVoltage::operator std::vector<uint8_t>() {
+BusDCVoltage::operator std::vector<uint8_t>() {
+    std::vector<uint8_t> data;
+    to_raw(static_cast<uint8_t>(0x41), data);
+    to_raw(static_cast<uint8_t>(0x01), data);
+    to_raw(static_cast<uint16_t>(0x00), data);
+    to_raw(static_cast<uint32_t>(volt * 1000), data);
+
+    return data;
+}
+
+// BusDCCurrent
+
+BusDCCurrent::BusDCCurrent(const std::vector<uint8_t> raw) {
+    ampere = (float)from_raw<int32_t>(raw, 4) / 1000.;
+}
+
+BusDCCurrent::BusDCCurrent(float _ampere) : ampere(_ampere) {
+}
+
+BusDCCurrent::BusDCCurrent() : ampere(0.) {
+}
+
+std::ostream& operator<<(std::ostream& out, const BusDCCurrent& self) {
+    out << "BusDCCurrent: " << std::to_string(self.ampere);
+    return out;
+}
+
+BusDCCurrent::operator std::vector<uint8_t>() {
+    std::vector<uint8_t> data;
+    to_raw(static_cast<uint8_t>(0x41), data);
+    to_raw(static_cast<uint8_t>(0x02), data);
+    to_raw(static_cast<uint16_t>(0x00), data);
+    to_raw(static_cast<uint32_t>(ampere * 1000), data);
+
+    return data;
+}
+
+// BatteyDCVoltage
+
+BatteryDCVoltage::BatteryDCVoltage(const std::vector<uint8_t> raw) {
+    volt = (float)from_raw<uint32_t>(raw, 4) / 1000.;
+}
+
+BatteryDCVoltage::BatteryDCVoltage(float _volt) : volt(_volt) {
+}
+
+BatteryDCVoltage::BatteryDCVoltage() : volt(0.) {
+}
+
+std::ostream& operator<<(std::ostream& out, const BatteryDCVoltage& self) {
+    out << "BatteyDCVoltage: " << std::to_string(self.volt);
+    return out;
+}
+
+BatteryDCVoltage::operator std::vector<uint8_t>() {
     std::vector<uint8_t> data;
     to_raw(static_cast<uint8_t>(0x10), data);
     to_raw(static_cast<uint8_t>(0x01), data);
@@ -98,24 +152,24 @@ SystemDCVoltage::operator std::vector<uint8_t>() {
     return data;
 }
 
-// SystemDCCurrent
+// BatteryDCCurrent
 
-SystemDCCurrent::SystemDCCurrent(const std::vector<uint8_t> raw) {
-    ampere = (float)from_raw<uint32_t>(raw, 4) / 1000.;
+BatteryDCCurrent::BatteryDCCurrent(const std::vector<uint8_t> raw) {
+    ampere = (float)from_raw<int32_t>(raw, 4) / 1000.;
 }
 
-SystemDCCurrent::SystemDCCurrent(float _ampere) : ampere(_ampere) {
+BatteryDCCurrent::BatteryDCCurrent(float _ampere) : ampere(_ampere) {
 }
 
-SystemDCCurrent::SystemDCCurrent() : ampere(0.) {
+BatteryDCCurrent::BatteryDCCurrent() : ampere(0.) {
 }
 
-std::ostream& operator<<(std::ostream& out, const SystemDCCurrent& self) {
-    out << "SystemDCCurrent: " << std::to_string(self.ampere);
+std::ostream& operator<<(std::ostream& out, const BatteryDCCurrent& self) {
+    out << "BatteryDCCurrent: " << std::to_string(self.ampere);
     return out;
 }
 
-SystemDCCurrent::operator std::vector<uint8_t>() {
+BatteryDCCurrent::operator std::vector<uint8_t>() {
     std::vector<uint8_t> data;
     to_raw(static_cast<uint8_t>(0x10), data);
     to_raw(static_cast<uint8_t>(0x02), data);

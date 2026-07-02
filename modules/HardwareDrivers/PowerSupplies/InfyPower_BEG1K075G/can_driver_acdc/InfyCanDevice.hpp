@@ -31,7 +31,7 @@ public:
     bool switch_on_off(bool on);
     bool set_walkin_enabled(bool on);
     bool set_inverter_mode(bool inverter);
-    bool set_voltage_current(float voltage, float current);
+    bool set_voltage_current(float voltage, float current, bool mode_export);
     bool set_output_mode(OutputMode mode);
     bool adjust_power_factor(float pf);
     bool set_generic_setting(uint8_t byte0, uint8_t byte1, uint32_t value);
@@ -73,11 +73,10 @@ public:
         float ac_phase_c_apparent_power{0.};
         float ac_total_apparent_ower{0.};
 
-        float dc_high_side_voltage{0.};
-        float dc_high_side_current{0.};
-
-        can_packet_acdc::SystemDCVoltage voltage;
-        can_packet_acdc::SystemDCCurrent current;
+        can_packet_acdc::BusDCVoltage bus_voltage;
+        can_packet_acdc::BusDCCurrent bus_current;
+        can_packet_acdc::BatteryDCVoltage battery_voltage;
+        can_packet_acdc::BatteryDCCurrent battery_current;
         can_packet_acdc::PowerModuleStatus status;
     } telemetry;
 
@@ -104,7 +103,8 @@ private:
     std::optional<std::chrono::steady_clock::time_point> last_in_start_processing{std::nullopt};
 
     // Dynamic configuration, will be changed at runtime.
-    std::atomic<float> setpoint_voltage{0}, setpoint_current{0};
+    std::atomic<float> setpoint_export_voltage{0}, setpoint_export_current{0};
+    std::atomic<float> setpoint_import_voltage{0}, setpoint_import_current{0};
     std::atomic_bool on{false};
     std::atomic_bool walkin_enable{false};
     std::atomic_bool inverter_mode{false};

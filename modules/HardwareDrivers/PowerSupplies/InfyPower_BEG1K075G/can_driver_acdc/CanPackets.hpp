@@ -73,21 +73,41 @@ struct GenericSetting {
     uint8_t byte1{0};
 };
 
-struct SystemDCVoltage {
-    SystemDCVoltage();
-    SystemDCVoltage(float _volt);
-    SystemDCVoltage(const std::vector<uint8_t> raw);
-    friend std::ostream& operator<<(std::ostream& out, const SystemDCVoltage& self);
+struct BusDCVoltage {
+    BusDCVoltage();
+    BusDCVoltage(float _volt);
+    BusDCVoltage(const std::vector<uint8_t> raw);
+    friend std::ostream& operator<<(std::ostream& out, const BusDCVoltage& self);
     operator std::vector<uint8_t>();
 
     float volt{0};
 };
 
-struct SystemDCCurrent {
-    SystemDCCurrent();
-    SystemDCCurrent(float _ampere);
-    SystemDCCurrent(const std::vector<uint8_t> raw);
-    friend std::ostream& operator<<(std::ostream& out, const SystemDCCurrent& self);
+struct BusDCCurrent {
+    BusDCCurrent();
+    BusDCCurrent(float _ampere);
+    BusDCCurrent(const std::vector<uint8_t> raw);
+    friend std::ostream& operator<<(std::ostream& out, const BusDCCurrent& self);
+    operator std::vector<uint8_t>();
+
+    float ampere{0};
+};
+
+struct BatteryDCVoltage {
+    BatteryDCVoltage();
+    BatteryDCVoltage(float _volt);
+    BatteryDCVoltage(const std::vector<uint8_t> raw);
+    friend std::ostream& operator<<(std::ostream& out, const BatteryDCVoltage& self);
+    operator std::vector<uint8_t>();
+
+    float volt{0};
+};
+
+struct BatteryDCCurrent {
+    BatteryDCCurrent();
+    BatteryDCCurrent(float _ampere);
+    BatteryDCCurrent(const std::vector<uint8_t> raw);
+    friend std::ostream& operator<<(std::ostream& out, const BatteryDCCurrent& self);
     operator std::vector<uint8_t>();
 
     float ampere{0};
