@@ -144,7 +144,7 @@ std::ostream& operator<<(std::ostream& out, const BatteryDCVoltage& self) {
 
 BatteryDCVoltage::operator std::vector<uint8_t>() {
     std::vector<uint8_t> data;
-    to_raw(static_cast<uint8_t>(0x10), data);
+    to_raw(static_cast<uint8_t>(0x11), data);
     to_raw(static_cast<uint8_t>(0x01), data);
     to_raw(static_cast<uint16_t>(0x00), data);
     to_raw(static_cast<uint32_t>(volt * 1000), data);
@@ -171,7 +171,7 @@ std::ostream& operator<<(std::ostream& out, const BatteryDCCurrent& self) {
 
 BatteryDCCurrent::operator std::vector<uint8_t>() {
     std::vector<uint8_t> data;
-    to_raw(static_cast<uint8_t>(0x10), data);
+    to_raw(static_cast<uint8_t>(0x11), data);
     to_raw(static_cast<uint8_t>(0x02), data);
     to_raw(static_cast<uint16_t>(0x00), data);
     to_raw(static_cast<uint32_t>(ampere * 1000), data);
@@ -221,6 +221,102 @@ PowerGroupNumber::operator std::vector<uint8_t>() {
     std::vector<uint8_t> data;
     to_raw(static_cast<uint8_t>(0x11), data);
     to_raw(static_cast<uint8_t>(0x20), data);
+    to_raw(static_cast<uint16_t>(0x00), data);
+    to_raw(static_cast<uint32_t>(0x00), data);
+
+    return data;
+}
+
+// DcMinOutputVoltage
+
+DcMinOutputVoltage::DcMinOutputVoltage(const std::vector<uint8_t> raw) {
+    volt = static_cast<float>(from_raw<uint32_t>(raw, 4)) / 1000.0;
+}
+
+DcMinOutputVoltage::DcMinOutputVoltage() : volt(0) {
+}
+
+std::ostream& operator<<(std::ostream& out, const DcMinOutputVoltage& self) {
+    out << "DcMinOutputVoltage: " << std::to_string(self.volt) << "V";
+    return out;
+}
+
+DcMinOutputVoltage::operator std::vector<uint8_t>() {
+    std::vector<uint8_t> data;
+    to_raw(static_cast<uint8_t>(0x11), data);
+    to_raw(static_cast<uint8_t>(0x31), data);
+    to_raw(static_cast<uint16_t>(0x00), data);
+    to_raw(static_cast<uint32_t>(0x00), data);
+
+    return data;
+}
+
+// DcMaxOutputVoltage
+
+DcMaxOutputVoltage::DcMaxOutputVoltage(const std::vector<uint8_t> raw) {
+    volt = static_cast<float>(from_raw<uint32_t>(raw, 4)) / 1000.0;
+}
+
+DcMaxOutputVoltage::DcMaxOutputVoltage() : volt(0) {
+}
+
+std::ostream& operator<<(std::ostream& out, const DcMaxOutputVoltage& self) {
+    out << "DcMaxOutputVoltage: " << std::to_string(self.volt) << "V";
+    return out;
+}
+
+DcMaxOutputVoltage::operator std::vector<uint8_t>() {
+    std::vector<uint8_t> data;
+    to_raw(static_cast<uint8_t>(0x11), data);
+    to_raw(static_cast<uint8_t>(0x30), data);
+    to_raw(static_cast<uint16_t>(0x00), data);
+    to_raw(static_cast<uint32_t>(0x00), data);
+
+    return data;
+}
+
+// DcMaxOutputCurrent
+
+DcMaxOutputCurrent::DcMaxOutputCurrent(const std::vector<uint8_t> raw) {
+    ampere = static_cast<float>(from_raw<uint32_t>(raw, 4)) / 1000.0;
+}
+
+DcMaxOutputCurrent::DcMaxOutputCurrent() : ampere(0) {
+}
+
+std::ostream& operator<<(std::ostream& out, const DcMaxOutputCurrent& self) {
+    out << "DcMaxOutputCurrent: " << std::to_string(self.ampere) << "A";
+    return out;
+}
+
+DcMaxOutputCurrent::operator std::vector<uint8_t>() {
+    std::vector<uint8_t> data;
+    to_raw(static_cast<uint8_t>(0x11), data);
+    to_raw(static_cast<uint8_t>(0x32), data);
+    to_raw(static_cast<uint16_t>(0x00), data);
+    to_raw(static_cast<uint32_t>(0x00), data);
+
+    return data;
+}
+
+// DcRatedOutputPower
+
+DcRatedOutputPower::DcRatedOutputPower(const std::vector<uint8_t> raw) {
+    watt = static_cast<float>(from_raw<uint32_t>(raw, 4)) / 1000.0;
+}
+
+DcRatedOutputPower::DcRatedOutputPower() : watt(0) {
+}
+
+std::ostream& operator<<(std::ostream& out, const DcRatedOutputPower& self) {
+    out << "DcRatedOutputPower: " << std::to_string(self.watt) << "W";
+    return out;
+}
+
+DcRatedOutputPower::operator std::vector<uint8_t>() {
+    std::vector<uint8_t> data;
+    to_raw(static_cast<uint8_t>(0x11), data);
+    to_raw(static_cast<uint8_t>(0x33), data);
     to_raw(static_cast<uint16_t>(0x00), data);
     to_raw(static_cast<uint32_t>(0x00), data);
 

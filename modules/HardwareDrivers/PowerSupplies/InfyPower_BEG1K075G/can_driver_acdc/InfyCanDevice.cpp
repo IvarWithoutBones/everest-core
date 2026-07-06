@@ -18,6 +18,11 @@ InfyCanDevice::~InfyCanDevice() {
     exitTxThread = true;
 }
 
+bool InfyCanDevice::Telemetry::has_all_limits() const {
+    return dc_max_output_voltage.has_value() && dc_min_output_voltage.has_value() &&
+           dc_max_output_current.has_value() && dc_rated_output_power.has_value();
+}
+
 void InfyCanDevice::set_config(uint8_t group_address, uint8_t controller_address) {
     this->group_address = group_address;
     this->controller_address = controller_address;
@@ -26,50 +31,19 @@ void InfyCanDevice::set_config(uint8_t group_address, uint8_t controller_address
                << static_cast<int>(controller_address);
 }
 
-void InfyCanDevice::rx_handler(uint32_t can_id, const std::vector<uint8_t>& payload) {
-    EVLOG_debug << "Infy: CAN frame received. ID: 0x" << std::hex << can_id;
-
-    // We only use extended frames here
-    if (!(can_id & CAN_EFF_FLAG)) {
-        EVLOG_debug << "Infy: Ignoring, not extended protocol.";
+void InfyCanDevice::handle_group_packet(const uint8_t source_address, const std::vector<uint8_t>& payload,
+                                        const uint16_t packet_type) {
+    if (packet_type != 0x1120 && source_address != group_address) {
+        // 0x1120 (module discovery) puts the group address in a different place, see below.
         return;
     }
 
-    // is it for our controller address?
-    if (can_packet_acdc::destination_address_from_can_id(can_id) != controller_address) {
-        return;
-    }
+    switch (packet_type) {
+    case 0x1010: {
+        can_packet_acdc::PowerModuleNumber n(payload);
+    } break;
 
-    if (can_packet_acdc::command_number_from_can_id(can_id) == can_packet_acdc::CMD_WRITE) {
-        switch (can_packet_acdc::error_code_from_can_id(can_id)) {
-        case 0x02:
-            EVLOG_error << "Infy: ERROR: Command invalid.";
-            break;
-        case 0x03:
-            EVLOG_error << "Infy: ERROR: Data invalid.";
-            break;
-        case 0x07:
-            EVLOG_error << "Infy: ERROR: In start processing.";
-
-            // Module addresses aren't stable during startup, clear the list.
-            std::lock_guard<std::mutex> lock(module_addresses_mutex);
-            module_addresses.clear();
-            last_in_start_processing = std::chrono::steady_clock::now();
-            break;
-        }
-        return;
-    }
-
-    // is it a reply to a read command?
-    if (can_packet_acdc::command_number_from_can_id(can_id) != can_packet_acdc::CMD_READ) {
-        return;
-    }
-
-    uint16_t packet_type = payload[0] << 8 | payload[1];
-
-    // is it from our group address?
-    const auto source_address = can_packet_acdc::source_address_from_can_id(can_id);
-    if (packet_type == 0x1120) {
+    case 0x1120: {
         // This queries which module addresses are in the group, the CAN ID's source address is the module address,
         // and the group address is encoded in the payload. Used to discover which modules are in the group.
         can_packet_acdc::GenericSetting s(payload);
@@ -77,54 +51,25 @@ void InfyCanDevice::rx_handler(uint32_t can_id, const std::vector<uint8_t>& payl
             return;
         }
 
-        // Check if we haven't received the "In Start Processing" error in a while, which occurs during system startup.
-        // During this (and ~1s afterwards) module addresses aren't assigned yet, and this packets always reads group 0.
-        std::lock_guard<std::mutex> lock(module_addresses_mutex);
-        if (last_in_start_processing.has_value() &&
-            std::chrono::steady_clock::now() - last_in_start_processing.value() < std::chrono::seconds(1)) {
-            EVLOG_debug << "Infy: Ignoring module address discovery, still in start processing.";
-            return;
-        }
-
-        // Add the module address to the list of known modules in the group (if it is not already present).
-        if (std::find(module_addresses.begin(), module_addresses.end(), source_address) == module_addresses.end()) {
-            EVLOG_info << "Infy: Discovered module address 0x" << std::hex << std::uppercase
+        std::lock_guard<std::mutex> lock(telemetries_mutex);
+        if (telemetries.find(source_address) == telemetries.end()) {
+            telemetries.emplace(source_address, Telemetry{});
+            EVLOG_info << "Infy: Discovered new module with address 0x" << std::hex << std::uppercase
                        << static_cast<int>(source_address);
-
-            module_addresses.push_back(source_address);
         }
-    } else {
-        if (can_packet_acdc::device_number_from_can_id(can_id) == can_packet_acdc::DEV_GROUP) {
-            if (source_address != group_address)
-                return;
-        } else {
-            // The message came from a single module, check if our group manages it.
-            std::lock_guard<std::mutex> lock(module_addresses_mutex);
-            if (std::find(module_addresses.begin(), module_addresses.end(), source_address) == module_addresses.end()) {
-                EVLOG_debug << "Infy: Ignoring packet from unknown module address 0x" << std::hex << std::uppercase
-                            << static_cast<int>(source_address);
-                return;
-            }
-        }
-    }
+    } break;
 
-    if (can_packet_acdc::error_code_from_can_id(can_id) > 0) {
-        EVLOG_debug << "Infy: Parsing CAN packet type: " << std::hex << packet_type << " Error code:" << std::hex
-                    << (int)can_packet_acdc::error_code_from_can_id(can_id);
+    default:
+        EVLOG_debug << "Infy: Received unknown group telemetry packet type 0x" << std::hex << std::uppercase
+                    << static_cast<int>(packet_type) << " from source address 0x" << std::hex << std::uppercase
+                    << static_cast<int>(source_address);
+        break;
     }
+}
 
+void InfyCanDevice::handle_module_packet(Telemetry& telemetry, const std::vector<uint8_t>& payload,
+                                         const uint16_t packet_type) {
     switch (packet_type) {
-    case 0x1001: {
-        telemetry.battery_voltage = payload;
-    } break;
-
-    case 0x1002: {
-        telemetry.battery_current = payload;
-        if (!inverter_mode.load()) {
-            signalVoltageCurrent(telemetry.battery_voltage.volt, telemetry.battery_current.ampere);
-        }
-    } break;
-
     case 0x1010: {
         can_packet_acdc::PowerModuleNumber n(payload);
     } break;
@@ -132,6 +77,17 @@ void InfyCanDevice::rx_handler(uint32_t can_id, const std::vector<uint8_t>& payl
     case 0x1110: {
         can_packet_acdc::PowerModuleStatus s(payload);
         telemetry.status = s;
+    } break;
+
+    case 0x1101: {
+        telemetry.battery_voltage = payload;
+    } break;
+
+    case 0x1102: {
+        telemetry.battery_current = payload;
+        if (!inverter_mode.load()) {
+            signalVoltageCurrent(telemetries);
+        }
     } break;
 
     case 0x1111: {
@@ -159,26 +115,32 @@ void InfyCanDevice::rx_handler(uint32_t can_id, const std::vector<uint8_t>& payl
         telemetry.ambient_temperature = s.value / 1000.;
     } break;
 
-        // 0x1120: handled above
-
     case 0x1130: {
-        can_packet_acdc::GenericSetting s(payload);
-        telemetry.dc_max_output_voltage = s.value / 1000.;
+        const auto previously_unknown = !telemetry.dc_max_output_voltage.has_value();
+        telemetry.dc_max_output_voltage = can_packet_acdc::DcMaxOutputVoltage(payload);
+        if (previously_unknown && telemetry.has_all_limits())
+            signalCapabilitiesUpdate(telemetries);
     } break;
 
     case 0x1131: {
-        can_packet_acdc::GenericSetting s(payload);
-        telemetry.dc_min_output_voltage = s.value / 1000.;
+        const auto previously_unknown = !telemetry.dc_min_output_voltage.has_value();
+        telemetry.dc_min_output_voltage = can_packet_acdc::DcMinOutputVoltage(payload);
+        if (previously_unknown && telemetry.has_all_limits())
+            signalCapabilitiesUpdate(telemetries);
     } break;
 
     case 0x1132: {
-        can_packet_acdc::GenericSetting s(payload);
-        telemetry.dc_max_output_current = s.value / 1000.;
+        const auto previously_unknown = !telemetry.dc_max_output_current.has_value();
+        telemetry.dc_max_output_current = can_packet_acdc::DcMaxOutputCurrent(payload);
+        if (previously_unknown && telemetry.has_all_limits())
+            signalCapabilitiesUpdate(telemetries);
     } break;
 
     case 0x1133: {
-        can_packet_acdc::GenericSetting s(payload);
-        telemetry.dc_rated_output_power = s.value / 1000.;
+        const auto previously_unknown = !telemetry.dc_rated_output_power.has_value();
+        telemetry.dc_rated_output_power = can_packet_acdc::DcRatedOutputPower(payload);
+        if (previously_unknown && telemetry.has_all_limits())
+            signalCapabilitiesUpdate(telemetries);
     } break;
 
     case 0x2101: {
@@ -283,81 +245,186 @@ void InfyCanDevice::rx_handler(uint32_t can_id, const std::vector<uint8_t>& payl
     case 0x4102: {
         telemetry.bus_current = {payload};
         if (inverter_mode.load()) {
-            signalVoltageCurrent(telemetry.bus_voltage.volt, telemetry.bus_current.ampere);
+            signalVoltageCurrent(telemetries);
         }
     } break;
 
     default: {
-        can_packet_acdc::GenericSetting s(payload);
+        EVLOG_debug << "Infy: Received unknown module telemetry packet type 0x" << std::hex << std::uppercase
+                    << static_cast<int>(packet_type);
+        return; // Do not update `last_update` for unhandled packets.
     }
+    }
+
+    telemetry.last_update = std::chrono::steady_clock::now();
+}
+
+void InfyCanDevice::rx_handler(uint32_t can_id, const std::vector<uint8_t>& payload) {
+    EVLOG_debug << "Infy: CAN frame received. ID: 0x" << std::hex << can_id;
+
+    // We only use extended frames here
+    if (!(can_id & CAN_EFF_FLAG)) {
+        EVLOG_debug << "Infy: Ignoring, not extended protocol.";
+        return;
+    }
+
+    // is it for our controller address?
+    if (can_packet_acdc::destination_address_from_can_id(can_id) != controller_address) {
+        return;
+    }
+
+    const auto command_number = can_packet_acdc::command_number_from_can_id(can_id);
+    if (command_number == can_packet_acdc::CMD_WRITE) {
+        switch (can_packet_acdc::error_code_from_can_id(can_id)) {
+        case 0x02:
+            EVLOG_error << "Infy: ERROR: Command invalid.";
+            break;
+        case 0x03:
+            EVLOG_error << "Infy: ERROR: Data invalid.";
+            break;
+        case 0x07:
+            EVLOG_error << "Infy: ERROR: In start processing.";
+            last_in_start_processing_error = std::chrono::steady_clock::now();
+
+            // Module addresses aren't stable during in-start processing, the CAN ID incorrectly reports address 0.
+            // This means we might've processed data from modules outside of our group (if we manage address 0),
+            // and will consider address 0 to be apart of our group on the next address discovery poll.
+            // Be safe and consider all our data invalid, we will re-initialize it after addresses stabilize.
+            std::lock_guard<std::mutex> lock(telemetries_mutex);
+            telemetries.clear();
+            break;
+        }
+        return;
+    }
+
+    // is it a reply to a read command?
+    if (command_number != can_packet_acdc::CMD_READ) {
+        return;
+    }
+
+    // Are module addresses stable yet?
+    if (last_in_start_processing_error.has_value() &&
+        std::chrono::steady_clock::now() - last_in_start_processing_error.value() < std::chrono::seconds(1)) {
+        EVLOG_debug << "Infy: Ignoring responses, module addresses are not stable yet.";
+        return;
+    }
+
+    uint16_t packet_type = payload[0] << 8 | payload[1];
+    const auto source_address = can_packet_acdc::source_address_from_can_id(can_id);
+
+    switch (can_packet_acdc::device_number_from_can_id(can_id)) {
+    case can_packet_acdc::DEV_MODULE: {
+        std::lock_guard<std::mutex> lock(telemetries_mutex);
+        auto telemetry = telemetries.find(source_address);
+
+        // Does the module belong to our group?
+        if (telemetry != telemetries.end()) {
+            handle_module_packet(telemetry->second, payload, packet_type);
+        }
+    } break;
+
+    case can_packet_acdc::DEV_GROUP: {
+        handle_group_packet(source_address, payload, packet_type);
+    } break;
+
+    default:
+        return;
     }
 }
 
 void InfyCanDevice::txThread() {
+    const int delay_us = 50000;
+
+    std::vector<uint8_t> poll_addresses{};
+    std::vector<uint8_t> limit_poll_addresses{};
+
     while (!exitTxThread) {
-        const int delay_us = 50000;
+        poll_addresses.clear();
+        limit_poll_addresses.clear();
+        {
+            std::lock_guard<std::mutex> lock(telemetries_mutex);
+            for (const auto& [address, telemetry] : telemetries) {
+                poll_addresses.push_back(address);
+                if (!telemetry.has_all_limits()) {
+                    limit_poll_addresses.push_back(address);
+                }
+            }
+        }
 
-        // request which modules are in this group. Answer will be processed by RX thread.
-        request_rx(can_packet_acdc::DEV_GROUP, can_packet_acdc::PowerGroupNumber());
+        // Request the state of the system. Answer will be processed by the RX thread.
+        request_rx(can_packet_acdc::DEV_GROUP, {group_address}, can_packet_acdc::PowerGroupNumber());
         usleep(delay_us);
 
-        // request state. Answer will be processed by RX thread.
-        request_rx(can_packet_acdc::DEV_MODULE, can_packet_acdc::PowerModuleStatus());
+        if (!limit_poll_addresses.empty()) {
+            request_rx(can_packet_acdc::DEV_MODULE, limit_poll_addresses, can_packet_acdc::DcMinOutputVoltage());
+            usleep(delay_us);
+
+            request_rx(can_packet_acdc::DEV_MODULE, limit_poll_addresses, can_packet_acdc::DcMaxOutputVoltage());
+            usleep(delay_us);
+
+            request_rx(can_packet_acdc::DEV_MODULE, limit_poll_addresses, can_packet_acdc::DcMaxOutputCurrent());
+            usleep(delay_us);
+
+            request_rx(can_packet_acdc::DEV_MODULE, limit_poll_addresses, can_packet_acdc::DcRatedOutputPower());
+            usleep(delay_us);
+        }
+
+        // Request the state of each module. Answer will be processed by the RX thread.
+        request_rx(can_packet_acdc::DEV_MODULE, poll_addresses, can_packet_acdc::BatteryDCVoltage());
         usleep(delay_us);
 
-        // request inverter state. Answer will be processed by RX thread.
-        request_rx(can_packet_acdc::DEV_MODULE, can_packet_acdc::InverterStatus());
+        request_rx(can_packet_acdc::DEV_MODULE, poll_addresses, can_packet_acdc::BatteryDCCurrent());
         usleep(delay_us);
 
-        tx(can_packet_acdc::DEV_GROUP, can_packet_acdc::OnOff(on));
+        request_rx(can_packet_acdc::DEV_MODULE, poll_addresses, can_packet_acdc::BusDCVoltage());
         usleep(delay_us);
 
-        // request current battery-side DC voltage. Answer will be processed by RX thread.
-        request_rx(can_packet_acdc::DEV_GROUP, can_packet_acdc::BatteryDCVoltage());
+        request_rx(can_packet_acdc::DEV_MODULE, poll_addresses, can_packet_acdc::BusDCCurrent());
         usleep(delay_us);
+        request_rx(can_packet_acdc::DEV_MODULE, poll_addresses, can_packet_acdc::PowerModuleStatus());
 
-        // request current battery-side DC current. Answer will be processed by RX thread.
-        request_rx(can_packet_acdc::DEV_GROUP, can_packet_acdc::BatteryDCCurrent());
-        usleep(delay_us);
-
-        // request current bus-side DC voltage. Answer will be processed by RX thread.
-        request_rx(can_packet_acdc::DEV_MODULE, can_packet_acdc::BusDCVoltage());
-        usleep(delay_us);
-
-        // request current bus-side DC current. Answer will be processed by RX thread.
-        request_rx(can_packet_acdc::DEV_MODULE, can_packet_acdc::BusDCCurrent());
+        request_rx(can_packet_acdc::DEV_MODULE, poll_addresses, can_packet_acdc::InverterStatus());
         usleep(delay_us);
 
         if (inverter_mode.load()) {
             if (setpoint_import_voltage > 150.0) {
-                // Configure the bus side limits
-                tx(can_packet_acdc::DEV_GROUP, can_packet_acdc::BusDCVoltage(setpoint_import_voltage));
-                usleep(delay_us);
-                tx(can_packet_acdc::DEV_GROUP, can_packet_acdc::BusDCCurrent(setpoint_import_current));
+                // Configure the bus side setpoint.
+                tx(can_packet_acdc::DEV_GROUP, {group_address}, can_packet_acdc::BusDCVoltage(setpoint_import_voltage));
                 usleep(delay_us);
 
-                // Configure the battery side limits
-                tx(can_packet_acdc::DEV_GROUP, can_packet_acdc::BatteryDCCurrent(setpoint_import_current * 2));
+                tx(can_packet_acdc::DEV_GROUP, {group_address}, can_packet_acdc::BusDCCurrent(setpoint_import_current));
+                usleep(delay_us);
+
+                // Configure the battery side limits.
+                tx(can_packet_acdc::DEV_GROUP, {group_address},
+                   can_packet_acdc::BatteryDCCurrent(max_export_current_A.load()));
                 usleep(delay_us);
             }
         } else {
             if (setpoint_export_voltage > 150.0) {
-                // Configure the battery side limits
-                tx(can_packet_acdc::DEV_GROUP, can_packet_acdc::BatteryDCVoltage(setpoint_export_voltage));
-                usleep(delay_us);
-                tx(can_packet_acdc::DEV_GROUP, can_packet_acdc::BatteryDCCurrent(setpoint_export_current));
+                // Configure the battery side setpoint.
+                tx(can_packet_acdc::DEV_GROUP, {group_address},
+                   can_packet_acdc::BatteryDCVoltage(setpoint_export_voltage));
                 usleep(delay_us);
 
-                // Configure the bus side limits
-                tx(can_packet_acdc::DEV_GROUP, can_packet_acdc::BusDCCurrent(setpoint_export_current * 2));
+                tx(can_packet_acdc::DEV_GROUP, {group_address},
+                   can_packet_acdc::BatteryDCCurrent(setpoint_export_current));
+                usleep(delay_us);
+
+                // Configure the bus side limits.
+                tx(can_packet_acdc::DEV_GROUP, {group_address},
+                   can_packet_acdc::BusDCCurrent(max_import_current_A.load()));
                 usleep(delay_us);
             }
         }
 
-        tx(can_packet_acdc::DEV_GROUP, can_packet_acdc::WalkInEnable(walkin_enable));
+        tx(can_packet_acdc::DEV_GROUP, {group_address}, can_packet_acdc::WorkingMode(inverter_mode));
         usleep(delay_us);
 
-        tx(can_packet_acdc::DEV_GROUP, can_packet_acdc::WorkingMode(inverter_mode));
+        tx(can_packet_acdc::DEV_GROUP, {group_address}, can_packet_acdc::WalkInEnable(walkin_enable));
+        usleep(delay_us);
+
+        tx(can_packet_acdc::DEV_GROUP, {group_address}, can_packet_acdc::OnOff(on));
         usleep(delay_us);
     }
 }
@@ -378,7 +445,7 @@ bool InfyCanDevice::set_inverter_mode(bool i) {
 }
 
 bool InfyCanDevice::adjust_power_factor(float pf) {
-    return tx(can_packet_acdc::DEV_GROUP, can_packet_acdc::PowerFactorAdjust(pf));
+    return tx(can_packet_acdc::DEV_GROUP, {group_address}, can_packet_acdc::PowerFactorAdjust(pf));
 }
 
 bool InfyCanDevice::set_voltage_current(float voltage, float current, bool mode_export) {
@@ -393,45 +460,28 @@ bool InfyCanDevice::set_voltage_current(float voltage, float current, bool mode_
 }
 
 bool InfyCanDevice::set_generic_setting(uint8_t byte0, uint8_t byte1, uint32_t value) {
-    return tx(can_packet_acdc::DEV_GROUP, can_packet_acdc::GenericSetting(byte0, byte1, value));
+    return tx(can_packet_acdc::DEV_GROUP, {group_address}, can_packet_acdc::GenericSetting(byte0, byte1, value));
 }
 
 bool InfyCanDevice::set_output_mode(OutputMode mode) {
     return set_generic_setting(0x11, 0x26, static_cast<std::underlying_type<OutputMode>::type>(mode));
 }
 
-bool InfyCanDevice::tx(const uint8_t dev, const std::vector<uint8_t>& payload) {
-    std::vector<uint8_t> destinations{};
-    if (dev == can_packet_acdc::DEV_MODULE) {
-        // TODO: Pass module_addresses to avoid re-locking
-        std::lock_guard<std::mutex> lock(module_addresses_mutex);
-        destinations = module_addresses;
-    } else {
-        destinations.push_back(group_address);
-    }
-
+bool InfyCanDevice::tx(const uint8_t dev, const std::vector<uint8_t>& addresses, const std::vector<uint8_t>& payload) {
     bool success = true;
-    for (const auto dst : destinations) {
-        auto can_id = can_packet_acdc::encode_can_id(controller_address, dst, can_packet_acdc::CMD_WRITE, dev, 0);
+    for (const auto addr : addresses) {
+        auto can_id = can_packet_acdc::encode_can_id(controller_address, addr, can_packet_acdc::CMD_WRITE, dev, 0);
         can_id |= 0x80000000U; // Extended frame format
         success &= _tx(can_id, payload);
     }
     return success;
 }
 
-bool InfyCanDevice::request_rx(const uint8_t dev, const std::vector<uint8_t>& payload) {
-    std::vector<uint8_t> destinations{};
-    if (dev == can_packet_acdc::DEV_MODULE) {
-        // TODO: Pass module_addresses to avoid re-locking
-        std::lock_guard<std::mutex> lock(module_addresses_mutex);
-        destinations = module_addresses;
-    } else {
-        destinations.push_back(group_address);
-    }
-
+bool InfyCanDevice::request_rx(const uint8_t dev, const std::vector<uint8_t>& addresses,
+                               const std::vector<uint8_t>& payload) {
     bool success = true;
-    for (const auto dst : destinations) {
-        uint32_t can_id = can_packet_acdc::encode_can_id(controller_address, dst, can_packet_acdc::CMD_READ, dev, 0);
+    for (const auto addr : addresses) {
+        uint32_t can_id = can_packet_acdc::encode_can_id(controller_address, addr, can_packet_acdc::CMD_READ, dev, 0);
         can_id |= 0x80000000U; // Extended frame format
         success &= _tx(can_id, payload);
     }
@@ -474,8 +524,12 @@ std::ostream& operator<<(std::ostream& out, const InfyCanDevice::Telemetry& self
     out << "DC High Voltage side: Voltage: " << std::to_string(self.bus_voltage.volt)
         << " Current: " << std::to_string(self.bus_current.ampere) << std::endl;
 
-    out << "Capabilities: dc_min: " << self.dc_min_output_voltage << "V dc_max: " << self.dc_max_output_voltage
-        << "V dc_max_current: " << self.dc_max_output_current << "A max_watt: " << self.dc_rated_output_power << "W "
+    out << "Capabilities: "
+        << (self.dc_min_output_voltage.has_value() ? std::to_string(self.dc_min_output_voltage.value().volt) + " " : "")
+        << (self.dc_max_output_voltage.has_value() ? std::to_string(self.dc_max_output_voltage.value().volt) + " " : "")
+        << (self.dc_rated_output_power.has_value() ? std::to_string(self.dc_rated_output_power.value().watt) + " " : "")
+        << (self.dc_max_output_current.has_value() ? std::to_string(self.dc_max_output_current.value().ampere) + " "
+                                                   : "")
         << std::endl;
 
     out << self.status << std::endl;

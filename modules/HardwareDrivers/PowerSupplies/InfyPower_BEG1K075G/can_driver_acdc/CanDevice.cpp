@@ -115,7 +115,7 @@ bool CanDevice::_tx(uint32_t can_id, const std::vector<uint8_t>& payload) {
     memcpy(frame.data, payload.data(), payload.size());
 
     if (write(can_fd, &frame, sizeof(can_frame)) != sizeof(can_frame)) {
-        EVLOG_error << "Failed to send can packet: " << strerror(errno);
+        // EVLOG_error << "Failed to send can packet: " << strerror(errno);
         return false;
     }
 

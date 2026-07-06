@@ -7,6 +7,7 @@
 #include "CanDevice.hpp"
 #include <atomic>
 #include <linux/can.h>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <sigslot/signal.hpp>
@@ -36,21 +37,14 @@ public:
     bool adjust_power_factor(float pf);
     bool set_generic_setting(uint8_t byte0, uint8_t byte1, uint32_t value);
 
-    // Data out
-    sigslot::signal<float, float, float> signalacdcTemperatures;
-    sigslot::signal<float, float> signalVoltageCurrent;
-    sigslot::signal<can_packet_acdc::PowerModuleStatus, can_packet_acdc::InverterStatus> signalModuleStatus;
-    bool request_rx(const uint8_t device_number, const std::vector<uint8_t>& payload);
+    bool request_rx(const uint8_t device_number, const std::vector<uint8_t>& addresses,
+                    const std::vector<uint8_t>& payload);
 
     struct Telemetry {
         float ac_ab_line_voltage{0.};
         float ac_bc_line_voltage{0.};
         float ac_ca_line_voltage{0.};
         float ambient_temperature{0.};
-        float dc_max_output_voltage{0.};
-        float dc_min_output_voltage{0.};
-        float dc_max_output_current{0.};
-        float dc_rated_output_power{0.};
         float ac_phase_a_current{0.};
         float ac_phase_b_current{0.};
         float ac_phase_c_current{0.};
@@ -73,12 +67,37 @@ public:
         float ac_phase_c_apparent_power{0.};
         float ac_total_apparent_ower{0.};
 
+        std::optional<can_packet_acdc::DcMinOutputVoltage> dc_min_output_voltage{};
+        std::optional<can_packet_acdc::DcMaxOutputVoltage> dc_max_output_voltage{};
+        std::optional<can_packet_acdc::DcMaxOutputCurrent> dc_max_output_current{};
+        std::optional<can_packet_acdc::DcRatedOutputPower> dc_rated_output_power{};
+
         can_packet_acdc::BusDCVoltage bus_voltage;
         can_packet_acdc::BusDCCurrent bus_current;
         can_packet_acdc::BatteryDCVoltage battery_voltage;
         can_packet_acdc::BatteryDCCurrent battery_current;
         can_packet_acdc::PowerModuleStatus status;
-    } telemetry;
+
+        std::chrono::time_point<std::chrono::steady_clock> last_update;
+
+        bool has_all_limits() const;
+    };
+
+    typedef std::map<uint8_t, Telemetry> TelemetryMap;
+
+    /// A map of module addresses to their corresponding telemetry data.
+    TelemetryMap telemetries{};
+    /// A mutex to synchronize access to `telemetries`.
+    std::mutex telemetries_mutex{};
+
+    // Capabilities. Used to configure the battery side limits when controlling the bus side (and vice versa).
+    std::atomic<float> max_export_current_A{};
+    std::atomic<float> max_import_current_A{};
+
+    // Data out
+    sigslot::signal<can_packet_acdc::PowerModuleStatus, can_packet_acdc::InverterStatus> signalModuleStatus;
+    sigslot::signal<TelemetryMap> signalVoltageCurrent;
+    sigslot::signal<TelemetryMap> signalCapabilitiesUpdate;
 
     friend std::ostream& operator<<(std::ostream& out, const Telemetry& self);
 
@@ -90,17 +109,18 @@ private:
     std::thread txThreadHandle;
     void txThread();
 
-    bool tx(const uint8_t device_number, const std::vector<uint8_t>& payload);
+    bool tx(const uint8_t device_number, const std::vector<uint8_t>& addresses, const std::vector<uint8_t>& payload);
+
+    void handle_module_packet(Telemetry& telemetry, const std::vector<uint8_t>& payload, uint16_t packet_type);
+    void handle_group_packet(const uint8_t source, const std::vector<uint8_t>& payload, const uint16_t packet_type);
 
     // Static configuration, safe to access from multiple threads as it is only set once during initialization.
     uint8_t group_address{};
     uint8_t controller_address{};
 
-    // List of module addresses currently online in the group. TODO: Remove when they go offline
-    std::vector<uint8_t> module_addresses{};
-    std::mutex module_addresses_mutex{};
-    // The time we last received error 0x07 (in start processing). The module addresses are stable ~1s after.
-    std::optional<std::chrono::steady_clock::time_point> last_in_start_processing{std::nullopt};
+    /// The time we last received error 0x07 (in start processing). Automatic address allocation finishes ~1s later.
+    /// Only accessed from the RX thread, so no synchronization is needed.
+    std::optional<std::chrono::steady_clock::time_point> last_in_start_processing_error{std::nullopt};
 
     // Dynamic configuration, will be changed at runtime.
     std::atomic<float> setpoint_export_voltage{0}, setpoint_export_current{0};

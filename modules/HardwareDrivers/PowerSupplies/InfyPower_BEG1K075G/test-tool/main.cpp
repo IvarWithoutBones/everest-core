@@ -53,27 +53,30 @@ int main(int argc, char** argv) {
 
     can.adjust_power_factor(1.0);
 
+    const std::vector<uint8_t> addrs = {0};
     while (true) {
-        can.request_rx(can_packet_acdc::DEV_MODULE, can_packet_acdc::GenericSetting(0x11, 0x03, 0x00));
-        can.request_rx(can_packet_acdc::DEV_MODULE, can_packet_acdc::GenericSetting(0x11, 0x04, 0x00));
-        can.request_rx(can_packet_acdc::DEV_MODULE, can_packet_acdc::GenericSetting(0x11, 0x05, 0x00));
-        can.request_rx(can_packet_acdc::DEV_MODULE, can_packet_acdc::GenericSetting(0x11, 0x06, 0x00));
+        can.request_rx(can_packet_acdc::DEV_MODULE, addrs, can_packet_acdc::GenericSetting(0x11, 0x03, 0x00));
+        can.request_rx(can_packet_acdc::DEV_MODULE, addrs, can_packet_acdc::GenericSetting(0x11, 0x04, 0x00));
+        can.request_rx(can_packet_acdc::DEV_MODULE, addrs, can_packet_acdc::GenericSetting(0x11, 0x05, 0x00));
+        can.request_rx(can_packet_acdc::DEV_MODULE, addrs, can_packet_acdc::GenericSetting(0x11, 0x06, 0x00));
 
-        can.request_rx(can_packet_acdc::DEV_MODULE, can_packet_acdc::GenericSetting(0x11, 0x30, 0x00));
-        can.request_rx(can_packet_acdc::DEV_MODULE, can_packet_acdc::GenericSetting(0x11, 0x31, 0x00));
+        can.request_rx(can_packet_acdc::DEV_MODULE, addrs, can_packet_acdc::GenericSetting(0x11, 0x30, 0x00));
+        can.request_rx(can_packet_acdc::DEV_MODULE, addrs, can_packet_acdc::GenericSetting(0x11, 0x31, 0x00));
 
-        can.request_rx(can_packet_acdc::DEV_MODULE, can_packet_acdc::GenericSetting(0x11, 0x32, 0x00));
-        can.request_rx(can_packet_acdc::DEV_MODULE, can_packet_acdc::GenericSetting(0x11, 0x33, 0x00));
+        can.request_rx(can_packet_acdc::DEV_MODULE, addrs, can_packet_acdc::GenericSetting(0x11, 0x32, 0x00));
+        can.request_rx(can_packet_acdc::DEV_MODULE, addrs, can_packet_acdc::GenericSetting(0x11, 0x33, 0x00));
         for (uint8_t i = 0x01; i < 0x14; i++) {
-            can.request_rx(can_packet_acdc::DEV_MODULE, can_packet_acdc::GenericSetting(0x21, i, 0x00));
+            can.request_rx(can_packet_acdc::DEV_MODULE, addrs, can_packet_acdc::GenericSetting(0x21, i, 0x00));
         }
 
-        can.request_rx(can_packet_acdc::DEV_MODULE, can_packet_acdc::GenericSetting(0x41, 0x01, 0x00));
-        can.request_rx(can_packet_acdc::DEV_MODULE, can_packet_acdc::GenericSetting(0x41, 0x02, 0x00));
+        can.request_rx(can_packet_acdc::DEV_MODULE, addrs, can_packet_acdc::GenericSetting(0x41, 0x01, 0x00));
+        can.request_rx(can_packet_acdc::DEV_MODULE, addrs, can_packet_acdc::GenericSetting(0x41, 0x02, 0x00));
 
         usleep(50000);
 
-        EVLOG_debug << can.telemetry;
+        for (const auto& [addr, telemetry] : can.telemetries) {
+            EVLOG_debug << "Module 0x" << std::hex << static_cast<int>(addr) << ": " << telemetry;
+        }
     }
 
     can.close_device();

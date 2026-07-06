@@ -127,10 +127,46 @@ struct PowerModuleNumber {
 struct PowerGroupNumber {
     PowerGroupNumber();
     PowerGroupNumber(const std::vector<uint8_t> raw);
-    friend std::ostream& operator<<(std::ostream& out, const PowerModuleNumber& self);
+    friend std::ostream& operator<<(std::ostream& out, const PowerGroupNumber& self);
     operator std::vector<uint8_t>();
 
     uint16_t number{0};
+};
+
+struct DcMinOutputVoltage {
+    DcMinOutputVoltage();
+    DcMinOutputVoltage(const std::vector<uint8_t> raw);
+    friend std::ostream& operator<<(std::ostream& out, const DcMinOutputVoltage& self);
+    operator std::vector<uint8_t>();
+
+    float volt{0};
+};
+
+struct DcMaxOutputVoltage {
+    DcMaxOutputVoltage();
+    DcMaxOutputVoltage(const std::vector<uint8_t> raw);
+    friend std::ostream& operator<<(std::ostream& out, const DcMaxOutputVoltage& self);
+    operator std::vector<uint8_t>();
+
+    float volt{0};
+};
+
+struct DcMaxOutputCurrent {
+    DcMaxOutputCurrent();
+    DcMaxOutputCurrent(const std::vector<uint8_t> raw);
+    friend std::ostream& operator<<(std::ostream& out, const DcMaxOutputCurrent& self);
+    operator std::vector<uint8_t>();
+
+    float ampere{0};
+};
+
+struct DcRatedOutputPower {
+    DcRatedOutputPower();
+    DcRatedOutputPower(const std::vector<uint8_t> raw);
+    friend std::ostream& operator<<(std::ostream& out, const DcRatedOutputPower& self);
+    operator std::vector<uint8_t>();
+
+    float watt{0};
 };
 
 struct PowerModuleStatus {

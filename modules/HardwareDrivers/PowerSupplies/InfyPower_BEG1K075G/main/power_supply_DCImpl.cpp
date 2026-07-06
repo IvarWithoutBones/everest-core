@@ -27,34 +27,30 @@ bool should_log_setpoint(std::optional<double>& last_voltage, std::optional<doub
 } // namespace
 
 void power_supply_DCImpl::init() {
-    caps.bidirectional = true;
+    mod->acdc.signalVoltageCurrent.connect([this](InfyCanDevice::TelemetryMap telemetries) {
+        types::power_supply_DC::VoltageCurrent vc{};
+        const auto inverter_mode = last_publish_mode == types::power_supply_DC::Mode::Import;
 
-    caps.current_regulation_tolerance_A = 1;
-    caps.peak_current_ripple_A = 0.2;
+        for (const auto& [address, telemetry] : telemetries) {
+            if (inverter_mode) {
+                vc.voltage_V += telemetry.bus_voltage.volt;
+                vc.current_A += telemetry.bus_current.ampere;
+            } else {
+                vc.voltage_V += telemetry.battery_voltage.volt;
+                vc.current_A += telemetry.battery_current.ampere;
+            }
+        }
 
-    caps.min_export_current_A = 1;
-    caps.max_export_current_A = 73.3;
-    caps.min_export_voltage_V = 200;
-    caps.max_export_voltage_V = 1000;
-    caps.max_export_power_W = 22000;
-    caps.conversion_efficiency_export = 0.95;
+        // Get the average voltage across all modules.
+        if (!telemetries.empty())
+            vc.voltage_V /= telemetries.size();
 
-    caps.max_import_current_A = 73.3;
-    caps.min_import_current_A = 0;
-    caps.max_import_power_W = 22000;
-    caps.min_import_voltage_V = 200;
-    caps.max_import_voltage_V = 1000;
-    caps.conversion_efficiency_import = 0.95;
-
-    mod->acdc.signalVoltageCurrent.connect([this](float voltage, float current) {
-        types::power_supply_DC::VoltageCurrent vc;
         if (last_publish_mode == types::power_supply_DC::Mode::Import) {
             // According to ISO 15118-20 V2G20-1034 / V2G20-1035,
             // negative current indicates EV -> EVSE power transfer (discharging).
-            current = -current;
+            vc.current_A = -vc.current_A;
         }
-        vc.current_A = current;
-        vc.voltage_V = voltage;
+
         publish_voltage_current(vc);
     });
 
@@ -82,13 +78,82 @@ void power_supply_DCImpl::init() {
             }
         });
 
+    mod->acdc.signalCapabilitiesUpdate.connect([this](InfyCanDevice::TelemetryMap telemetries) {
+        types::power_supply_DC::Capabilities new_caps;
+        new_caps.bidirectional = true;
+
+        new_caps.current_regulation_tolerance_A = mod->config.current_regulation_tolerance_A;
+        new_caps.peak_current_ripple_A = mod->config.peak_current_ripple_A;
+        new_caps.conversion_efficiency_import = mod->config.conversion_efficiency_import;
+        new_caps.conversion_efficiency_export = mod->config.conversion_efficiency_export;
+
+        if (telemetries.empty()) {
+            // No modules are connected, we cannot import/export anything.
+            new_caps.max_import_current_A = 0;
+            new_caps.min_import_current_A = 0;
+            new_caps.max_import_power_W = 0;
+            new_caps.min_import_voltage_V = 0;
+            new_caps.max_import_voltage_V = 0;
+
+            new_caps.min_export_current_A = 0.0;
+            new_caps.max_export_current_A = 0.0;
+            new_caps.min_export_voltage_V = 0.0;
+            new_caps.max_export_voltage_V = 0.0;
+            new_caps.max_export_power_W = 0.0;
+
+            caps = new_caps;
+            publish_capabilities(new_caps);
+            return;
+        }
+
+        // There is no way to query the import limits from the power supply itself,
+        // so we use statically defined config values instead.
+        new_caps.max_import_current_A = mod->config.max_import_current_A;
+        new_caps.min_import_current_A = mod->config.min_import_current_A;
+        new_caps.min_import_voltage_V = mod->config.min_import_voltage_V;
+        new_caps.max_import_voltage_V = mod->config.max_import_voltage_V;
+        new_caps.max_import_power_W = mod->config.max_import_power_W;
+
+        new_caps.min_export_current_A = mod->config.min_export_current_A;
+        new_caps.min_export_voltage_V = std::numeric_limits<float>::min();
+        new_caps.max_export_voltage_V = std::numeric_limits<float>::max();
+        new_caps.max_export_current_A = 0.0;
+        new_caps.max_export_power_W = 0.0;
+
+        for (const auto& [address, telemetry] : telemetries) {
+            if (telemetry.dc_min_output_voltage.has_value())
+                new_caps.min_export_voltage_V =
+                    std::max(new_caps.min_export_voltage_V, telemetry.dc_min_output_voltage.value().volt);
+
+            if (telemetry.dc_max_output_voltage.has_value())
+                new_caps.max_export_voltage_V =
+                    std::min(new_caps.max_export_voltage_V, telemetry.dc_max_output_voltage.value().volt);
+
+            if (telemetry.dc_max_output_current.has_value())
+                new_caps.max_export_current_A += telemetry.dc_max_output_current.value().ampere;
+            if (telemetry.dc_rated_output_power.has_value())
+                new_caps.max_export_power_W += telemetry.dc_rated_output_power.value().watt;
+        }
+
+        caps = new_caps;
+        mod->acdc.max_export_current_A = new_caps.max_export_current_A;
+        mod->acdc.max_import_current_A = new_caps.max_import_current_A.value();
+
+        EVLOG_info << "Infy: Capabilities updated: export = " << new_caps.min_export_voltage_V << "V / "
+                   << new_caps.max_export_voltage_V << "V, " << new_caps.min_export_current_A << "A / "
+                   << new_caps.max_export_current_A << "A, " << new_caps.max_export_power_W << "W; "
+                   << "import = " << new_caps.min_import_voltage_V.value() << "V / "
+                   << new_caps.max_import_voltage_V.value() << "V, " << new_caps.min_import_current_A.value() << "A / "
+                   << new_caps.max_import_current_A.value() << "A, " << new_caps.max_import_power_W.value() << "W";
+        publish_capabilities(new_caps);
+    });
+
     mod->acdc.switch_on_off(false);
     mod->acdc.adjust_power_factor(1.0);
     mod->acdc.set_output_mode(InfyCanDevice::OutputMode::Automatic);
 }
 
 void power_supply_DCImpl::ready() {
-    publish_capabilities(caps);
 }
 
 void power_supply_DCImpl::handle_setMode(types::power_supply_DC::Mode& mode,

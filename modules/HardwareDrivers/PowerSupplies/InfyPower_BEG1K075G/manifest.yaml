@@ -20,6 +20,67 @@ config:
       Must be between 0x00 and 0x3E (in decimal: 0-62).
     type: integer
     default: 0
+  current_regulation_tolerance_A:
+    description: >-
+      Absolute magnitude of the regulation tolerance in Ampere.
+    type: number
+    default: 1
+  peak_current_ripple_A:
+    description: >-
+      Peak-to-peak magnitude of the current ripple in Ampere
+    type: number
+    default: 0.2
+  conversion_efficiency_import:
+    description: >-
+      Typical import efficiency used for energy management
+    type: number
+    default: 0.95
+    min: 0.0
+    max: 1.0
+  conversion_efficiency_export:
+    description: >-
+      Typical export efficiency used for energy management
+    type: number
+    default: 0.95
+    min: 0.0
+    max: 1.0
+  min_export_current_A:
+    description: >-
+      Minimum current that the power supply can output to the car.
+      This must be set to the minimum battery-side current of the PSU you are using.
+    type: number
+    default: 1.0
+  min_import_current_A:
+    description: >-
+      Minimum current that the power supply can output to the grid in Ampere.
+      This must be set to the minimum bus-side current of the PSU you are using.
+    type: number
+    default: 0.0
+  max_import_current_A:
+    description: >-
+      Maximum current that the power supply can output to the grid in Ampere.
+      This must be set to the maximum bus-side current of the PSU you are using.
+    type: number
+    default: 73.3
+  min_import_voltage_V:
+    description: >-
+      Minimum voltage that the power supply can output to the grid in Volt.
+      This must be set to the minimum bus-side voltage of the PSU you are using.
+    type: number
+    default: 200.0
+  max_import_voltage_V:
+    description: >-
+      Maximum voltage that the power supply can output to the grid in Volt.
+      This must be set to the maximum bus-side voltage of the PSU you are using.
+    type: number
+    default: 1000.0
+  max_import_power_W:
+    description: >-
+      Maximum power that the power supply can output to the grid in Watt.
+      This must be set to the maximum bus-side power of the PSU you are using.
+    type: number
+    default: 22000.0
+
 provides:
   main:
     description: Main interface

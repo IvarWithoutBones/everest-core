@@ -23,6 +23,16 @@ struct Conf {
     std::string can_device;
     int controller_address;
     int group_address;
+    double current_regulation_tolerance_A;
+    double peak_current_ripple_A;
+    double conversion_efficiency_import;
+    double conversion_efficiency_export;
+    double min_export_current_A;
+    double min_import_current_A;
+    double max_import_current_A;
+    double min_import_voltage_V;
+    double max_import_voltage_V;
+    double max_import_power_W;
 };
 
 class InfyPower_BEG1K075G : public Everest::ModuleBase {
