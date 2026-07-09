@@ -468,4 +468,18 @@ PowerFactorAdjust::operator std::vector<uint8_t>() {
     return data;
 }
 
+// PortVoltageRegulation
+
+PortVoltageRegulation::PortVoltageRegulation(Mode m) : mode{m} {};
+
+PortVoltageRegulation::operator std::vector<uint8_t>() {
+    std::vector<uint8_t> data;
+    to_raw(static_cast<uint8_t>(0x11), data);
+    to_raw(static_cast<uint8_t>(0x34), data);
+    to_raw(static_cast<uint16_t>(0x00), data);
+    to_raw(static_cast<uint32_t>(static_cast<std::underlying_type_t<Mode>>(mode)), data);
+
+    return data;
+}
+
 } // namespace can_packet_acdc

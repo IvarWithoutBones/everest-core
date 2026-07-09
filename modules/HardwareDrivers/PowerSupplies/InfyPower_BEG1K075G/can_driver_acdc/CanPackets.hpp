@@ -231,6 +231,21 @@ struct PowerFactorAdjust {
     float pf{1.0};
 };
 
+struct PortVoltageRegulation {
+    enum class Mode : uint8_t {
+        /// No port voltage regulation.
+        Disabled = 0xA0,
+        /// Attempt to stabilize the battery-side voltage.
+        Battery = 0xA1,
+        /// Attempt to stabilize the bus-side voltage.
+        Bus = 0xA3,
+    };
+
+    PortVoltageRegulation(Mode mode);
+    operator std::vector<uint8_t>();
+    Mode mode{Mode::Disabled};
+};
+
 } // namespace can_packet_acdc
 
 #endif // CAN_PACKETS_HPP

@@ -280,7 +280,7 @@ void InfyCanDevice::rx_handler(uint32_t can_id, const std::vector<uint8_t>& payl
             EVLOG_error << "Infy: ERROR: Command invalid.";
             break;
         case 0x03:
-            EVLOG_error << "Infy: ERROR: Data invalid.";
+            // EVLOG_error << "Infy: ERROR: Data invalid.";
             break;
         case 0x07:
             EVLOG_error << "Infy: ERROR: In start processing.";
@@ -351,7 +351,7 @@ void InfyCanDevice::txThread() {
             }
         }
 
-        // Request the state of the system. Answer will be processed by the RX thread.
+        // Request each module in the group to report its address, so we can discover new modules.
         request_rx(can_packet_acdc::DEV_GROUP, {group_address}, can_packet_acdc::PowerGroupNumber());
         usleep(delay_us);
 
@@ -426,6 +426,12 @@ void InfyCanDevice::txThread() {
 
         tx(can_packet_acdc::DEV_GROUP, {group_address}, can_packet_acdc::OnOff(on));
         usleep(delay_us);
+
+        // Set the port voltage regulation mode
+        const auto port_voltage_regulation_mode = inverter_mode ? can_packet_acdc::PortVoltageRegulation::Mode::Bus
+                                                                : can_packet_acdc::PortVoltageRegulation::Mode::Battery;
+        tx(can_packet_acdc::DEV_GROUP, {group_address},
+           can_packet_acdc::PortVoltageRegulation(port_voltage_regulation_mode));
     }
 }
 
