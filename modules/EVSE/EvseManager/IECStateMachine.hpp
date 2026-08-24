@@ -128,6 +128,7 @@ private:
     bool has_ventilation{false};
     bool power_on_allowed{false};
     bool last_power_on_allowed{false};
+    types::evse_board_support::Reason last_power_on_reason{types::evse_board_support::Reason::PowerOff};
     std::atomic<double> pp_ampacity{0.0};
     std::atomic<double> last_amps{-1};
     std::atomic<AcPhases> max_phases{AcPhases::ThreePhases};

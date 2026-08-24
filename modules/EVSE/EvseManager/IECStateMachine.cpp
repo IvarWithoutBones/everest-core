@@ -267,8 +267,9 @@ std::queue<CPEvent> IECStateMachine::state_machine(std::optional<RawCPState> con
             if (pwm_running) { // C2
                 // 1) When we come from state B: switch on if we are allowed to
                 // 2) When we are in C2 for a while now and finally get a delayed power_on_allowed: also switch on
+                // 3) When we were already in C2 and power_on_allowed was already true, but the reason changed: notify the BSP driver
 
-                if (power_on_allowed && (!last_power_on_allowed || last_cp_state == RawCPState::B)) {
+                if (power_on_allowed && (!last_power_on_allowed || last_cp_state == RawCPState::B || last_power_on_reason != power_on_reason)) {
                     // Table A.6: Sequence 4 EV ready to charge.
                     // Must enable power within 3 seconds.
                     call_allow_power_on_bsp(true);
@@ -322,6 +323,7 @@ std::queue<CPEvent> IECStateMachine::state_machine(std::optional<RawCPState> con
         last_cp_state = cp_state;
         last_pwm_running = pwm_running;
         last_power_on_allowed = power_on_allowed;
+        last_power_on_reason = power_on_reason;
         // end of mutex protected section
     }
 
